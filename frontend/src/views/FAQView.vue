@@ -1,5 +1,5 @@
 <template>
     <main>
-        <h1>Dashboard</h1>
+        <h1>FAQ</h1>
     </main>
 </template>

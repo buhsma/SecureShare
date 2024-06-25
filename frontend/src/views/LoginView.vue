@@ -14,6 +14,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import authState from '@/tools/authState'
 
 export default {
     setup() {
@@ -21,6 +22,8 @@ export default {
         const password = ref('')
         const serverResponse = ref('')
         const router = useRouter()
+
+        const { setAuthState } = authState()
 
         const login = () => {
             axios.post('/api/token/', {
@@ -32,6 +35,7 @@ export default {
                     serverResponse.value = 'Login successful: ' + response.status
                     localStorage.setItem('access', response.data.access)
                     localStorage.setItem('refresh', response.data.refresh)
+                    setAuthState(true);
                     router.push({ name: 'dashboard' })
                 })
                 .catch(error => {
