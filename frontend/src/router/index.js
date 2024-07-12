@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from '@/views/HomeView.vue'
+import Download from '@/views/DownloadView.vue'
 import TestView from '@/views/TestView.vue'
 import Register from '@/views/RegisterView.vue'
 import Login from '@/views/LoginView.vue'
@@ -49,6 +50,12 @@ const router = createRouter({
       path: '/faq',
       name: 'faq',
       component: FAQ
+    },
+    {
+      path: '/download/:id/:cryptoKey',
+      name: 'download',
+      component: Download,
+      props: true
     }
   ]
 })
@@ -56,8 +63,7 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth && !(await isAuthenticated())) {
     next('/login')
-  }
-  else {
+  } else {
     next()
   }
 })

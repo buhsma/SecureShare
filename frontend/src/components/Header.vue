@@ -8,12 +8,7 @@
         <RouterLink to="faq">FAQ</RouterLink>
         <button v-if="userIsAuthenticated" @click="logout">Logout</button>
     </header>
-    <!-- <header>
-        <RouterLink to="/">Home</RouterLink>
-        <RouterLink to="register">+ Create account</RouterLink>
-        <RouterLink to="login">Login</RouterLink>
-        <button @click="logout">Logout</button>
-    </header> -->
+    <BluePortal />
 </template>
 
 <script>
@@ -21,9 +16,15 @@
 import { useRouter, RouterLink } from 'vue-router'
 import axios from 'axios'
 import authState from '@/tools/authState'
+import BluePortal from '@/components/BluePortal.vue'
+
 
 
 export default {
+    components: {
+        BluePortal,
+        RouterLink
+    },
     setup() {
         const { userIsAuthenticated, setAuthState } = authState();
         const router = useRouter()

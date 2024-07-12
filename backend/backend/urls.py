@@ -16,7 +16,8 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from ssapp.views import test, register, login, reset_password
+from ssapp.authView import test, register, login, reset_password
+from ssapp.storageView import handleFileUpload, handleFileDownload
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView, TokenBlacklistView
 
 urlpatterns = [
@@ -30,4 +31,7 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
+
+    path('api/upload/', handleFileUpload, name='upload'),
+    path('api/download/<str:id>/', handleFileDownload, name='download'),
 ]
