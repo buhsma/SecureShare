@@ -1,0 +1,8 @@
+
+package fileChunk;
+syntax = "proto3";
+
+message FileChunk {
+    bytes chunk = 1;
+    bytes iv = 2;
+}

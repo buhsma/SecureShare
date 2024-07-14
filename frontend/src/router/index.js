@@ -52,7 +52,7 @@ const router = createRouter({
       component: FAQ
     },
     {
-      path: '/download/:id/:cryptoKey',
+      path: '/download/:id/:cryptoKey/:fileName/:totalChunks',
       name: 'download',
       component: Download,
       props: true

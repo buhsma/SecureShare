@@ -15,103 +15,78 @@
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { ref } from 'vue';
-
+import { getKey, convertKey } from '@/tools/crypto';
+import protobuf from 'protobufjs';
 
 
 export default {
     setup() {
-        const maxSimultaneousUploads = 3;
+        const maxSimultaneousUploads = 15;
         const chunkSizeMB = 1;
         const status = ref('input');
         const id = ref(uuidv4());
         const link = ref('');
         const uploadQueue = ref([]);
-        const isUploading = ref(0);
         const uploadProgress = ref(0);
         const encryptProgress = ref(0);
         const worker = new Worker(new URL('@/tools/blueWorker.js', import.meta.url));
 
+        // Load the .proto file
+        let FileChunk;
+
+        fetch('src/protobuf/fileChunk.proto')
+            .then(response => response.text())
+            .then(proto => {
+                const root = protobuf.parse(proto).root;
+
+                FileChunk = root.lookupType("fileChunk.FileChunk");
+            });
 
         let chunksUploaded = 0;
         let chunksEncrypted = 0;
 
-        const uploadChunk = async (chunk, iv, index, totalChunks) => {
-            isUploading.value++;
-            let blob = new Blob([chunk], { type: 'application/octet-stream' });
-            const formData = new FormData();
-            formData.append('id', id.value);
-            formData.append('index', index);
-            formData.append('chunk', blob);
-            formData.append('iv', iv);
-            console.log('uploading chunk', index);
-            axios.post('http://localhost:8000/api/upload/', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
-            }).then(() => {
-                chunksUploaded++;
-                uploadProgress.value = (chunksUploaded / totalChunks) * 100;
-
-                if (uploadQueue.value.length > 0) {
-                    const nextChunk = uploadQueue.value.shift();
-                    uploadChunk(nextChunk.chunk, nextChunk.iv , nextChunk.index, totalChunks);
-                } else {
-                    isUploading.value--;
-                    if (isUploading.value === 0 && uploadQueue.value.length === 0) {
-                        worker.terminate();
-                        status.value = 'done';
-                    }
-                }
-            });
-        }
-
-        const getKey = async () => {
-            const key = await crypto.subtle.generateKey(
-                {
-                    name: "AES-GCM",
-                    length: 256
-                },
-                true,
-                ["encrypt", "decrypt"]
-            );
-            return key;
-        }
-
-        const convertKey = async (key) => {
-            const rawKey = await crypto.subtle.exportKey('raw', key);
-            const arrayBufferToUrlSafeBase64 = (buffer) => {
-                const binary = Array.prototype.map.call(new Uint8Array(buffer), byte => String.fromCharCode(byte)).join('');
-                const base64 = window.btoa(binary);
-                return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            }
-
-           
-            const urlSafeKey = arrayBufferToUrlSafeBase64(rawKey);
-            return urlSafeKey;
-        }
-
         const handleFileUpload = async (event) => {
             status.value = 'uploading';
             const file = event.target.files[0];
+            const fileName = file.name;
             const chunkSize = 1024 * 1024 * chunkSizeMB;
             const totalChunks = Math.ceil(file.size / chunkSize);
             const key = await getKey();
             const urlSaveKey = await convertKey(key);
-            link.value = `http://localhost:5173/download/${id.value}/${urlSaveKey}`;
+            link.value = `http://localhost:5173/download/${id.value}/${urlSaveKey}/${fileName}/${totalChunks}`;
 
             worker.onmessage = async (event) => {
                 console.log('encrypted chunk', event.data.index);
                 const encryptedChunk = event.data;
-                uploadQueue.value.push({
-                    chunk: encryptedChunk.chunk,
-                    iv: encryptedChunk.iv,
-                    index: encryptedChunk.index
-                });
                 chunksEncrypted++;
                 encryptProgress.value = (chunksEncrypted / totalChunks) * 100;
-                if (isUploading.value < maxSimultaneousUploads) {
+
+                // Create a new FileChunk message
+                let message = FileChunk.create({
+                    chunk: encryptedChunk.chunk,
+                    iv: encryptedChunk.iv
+                });
+
+                // Encode the message to a Buffer
+                let buffer = FileChunk.encode(message).finish();
+
+                // Add the buffer to the upload queue
+                uploadQueue.value.push(buffer);
+
+                while (uploadQueue.value.length > 0) {
                     const nextChunk = uploadQueue.value.shift();
-                    await uploadChunk(nextChunk.chunk, nextChunk.iv, nextChunk.index, totalChunks);
+                    try {
+                        await uploadChunk(nextChunk, id.value, encryptedChunk.index);
+                    } catch (error) {
+                        console.error(`failed to upload chunk ${error}`);
+                        // handle error, e.g. by retrying the upload
+                    }
+                }
+                if (chunksUploaded === totalChunks) {
+                    console.log('All chunks uploaded');
+                    worker.terminate();
+                    status.value = 'done';
+
                 }
             }
             let index = 0;
@@ -119,6 +94,10 @@ export default {
                 console.log('encrypting chunk', index);
                 const chunk = file.slice(start, start + chunkSize);
                 const iv = crypto.getRandomValues(new Uint8Array(12));
+
+                while (chunksEncrypted > chunksUploaded + maxSimultaneousUploads * 2) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
 
                 worker.postMessage({
                     index,
@@ -128,6 +107,27 @@ export default {
                 });
             }
         }
+
+        const uploadChunk = async (buffer, id, index) => {
+            try {
+                await axios.post(`http://localhost:8000/api/upload/`, buffer, {
+                    headers: {
+                        'Content-Type': 'application/octet-stream',
+                        'id': id,
+                        'index': index
+                    },
+                    responseType: 'arraybuffer'
+                });
+
+                chunksUploaded++;
+                uploadProgress.value = (chunksUploaded / totalChunks) * 100;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+
+
         return {
             handleFileUpload,
             uploadProgress,

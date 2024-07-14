@@ -10,14 +10,15 @@ from django.http import JsonResponse
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def handleFileUpload(request):
-    id = request.data.get("id")
+    id = request.META.get("id")
+    index = request.META.get("index")
     chunk = request.FILES.get("chunk")
-    index = request.data.get("index")
-    iv = request.data.get("iv")
+    
 
-    print(request.data)
+    print("id: ", id)
+    print("index: ", index)
 
-    if id is None or chunk is None or index is None or iv is None:
+    if id is None or chunk is None or index is None:
         return Response ({"error": "Failed to upload chunk"}, status=400)
     else:
         fileDir = os.path.join(settings.STORAGE_ROOT, id)
@@ -28,7 +29,7 @@ def handleFileUpload(request):
         with open(chunkPath, "wb") as f:
             f.write(chunk.read())
 
-        FileChunk.objects.create(file_id=id, index=index, iv=iv)
+        FileChunk.objects.create(file_id=id, index=index)
 
         return Response({"status": "Chunk uploaded"}, status=200)
     

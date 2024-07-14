@@ -59,10 +59,13 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:8000",
-]
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:5173",
+#     "http://localhost:8000",
+# ]
+CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_ALL_HEADERS = True
+CORS_ALLOW_HEADERS = ['id', 'index', 'Content-type']
 
 ROOT_URLCONF = 'backend.urls'
 
@@ -122,6 +125,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # 'DEFAULT_PARSER_CLASSES': (
+    #     'rest_framework.parsers.OcetStreamParser',
+    # ),
 }
 
 SIMPLE_JWT = {
