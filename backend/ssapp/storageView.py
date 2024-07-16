@@ -6,17 +6,21 @@ from rest_framework.response import Response
 from .models import FileChunk
 import base64
 from django.http import JsonResponse
+from rest_framework.decorators import parser_classes
+from .parser import OctetStreamParser
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@parser_classes([OctetStreamParser])
 def handleFileUpload(request):
-    id = request.META.get("id")
-    index = request.META.get("index")
-    chunk = request.FILES.get("chunk")
+    id = request.META.get("HTTP_ID")
+    index = request.META.get("HTTP_INDEX")
+    chunk = request.body
     
 
     print("id: ", id)
     print("index: ", index)
+    # print("chunk: ", chunk)
 
     if id is None or chunk is None or index is None:
         return Response ({"error": "Failed to upload chunk"}, status=400)
@@ -24,10 +28,10 @@ def handleFileUpload(request):
         fileDir = os.path.join(settings.STORAGE_ROOT, id)
         if not os.path.exists(fileDir):
             os.makedirs(fileDir)
-        
+        print("file size: ", len(chunk))
         chunkPath = os.path.join(fileDir, index)
         with open(chunkPath, "wb") as f:
-            f.write(chunk.read())
+            f.write(chunk)
 
         FileChunk.objects.create(file_id=id, index=index)
 
@@ -45,26 +49,27 @@ def collect_file_data(fileDir, chunks):
             base64_chunk = base64.b64encode(chunk_data).decode('utf-8')
             data.append({
                 "chunk": base64_chunk,
-                "iv": chunk.iv,
                 "index": chunk.index
             })
     return data
 
+from django.http import FileResponse
+
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def handleFileDownload(request, id):
+def handleFileDownload(request, id, index):
     if id is None:
         return Response({"error": "Failed to download file"}, status=400)
     else:
         fileDir = os.path.join(settings.STORAGE_ROOT, id)
-        if not os.path.exists(fileDir):
+        chunkPath = os.path.join(fileDir, str(index))
+        if not os.path.exists(chunkPath):
             return Response({"error": "File not found"}, status=404)
         else:
-            chunks = FileChunk.objects.filter(file_id=id).order_by("index")
-            if len(chunks) == 0:
-                return Response({"error": "File not found"}, status=404)
-            else:
-                data = collect_file_data(fileDir, chunks)
-                return JsonResponse(data, safe=False)
+            print("fileDir: ", fileDir)
+            print("chunkPath: ", chunkPath)
+            print("first 10 bytes: ", open(chunkPath, 'rb').read(10))
+            print("file size: ", os.path.getsize(chunkPath))
+            return FileResponse(open(chunkPath, 'rb'), content_type='application/octet-stream')
         
 

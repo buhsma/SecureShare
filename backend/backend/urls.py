@@ -33,5 +33,5 @@ urlpatterns = [
     path('api/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
 
     path('api/upload/', handleFileUpload, name='upload'),
-    path('api/download/<str:id>/', handleFileDownload, name='download'),
+    path('api/download/<str:id>/<int:index>/', handleFileDownload, name='download'),
 ]
