@@ -21,29 +21,21 @@ async function decrypt(chunk, key, iv) {
 self.onmessage = async function (event) {
   const { chunk, key, iv, index } = event.data
   console.log('Worker started', iv, key, chunk)
-  const ivArray = iv.split(',').map(Number);
-  const ivUint8Array = new Uint8Array(ivArray);
-  console.log(typeof ivUint8Array);
+  const ivUint8Array = new Uint8Array(iv);
   console.log(Array.isArray(ivUint8Array));
-
+  console.log('key', key, typeof key);
   try {
     const importedKey = await crypto.subtle.importKey(
       'jwk',
       key,
       { name: 'AES-GCM', length: 256 },
       false,
-      ['encrypt', 'decrypt']
+      ['decrypt']
     )
-
-    const binaryString = atob(chunk)
-    const len = binaryString.length
-    const bytes = new Uint8Array(len)
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
-    }
-    const chunkBuffer = bytes.buffer
-
-    const decryptedChunk = await decrypt(chunkBuffer, importedKey, ivUint8Array);
+    console.log('key before decryption:', importedKey);
+    console.log('iv before decryption:', ivUint8Array);
+    console.log('chunk before decryption:', chunk);
+    const decryptedChunk = await decrypt(chunk, importedKey, ivUint8Array);
     self.postMessage({ decryptedChunk: decryptedChunk, index }, [decryptedChunk]);
   } catch (error) {
     console.error('Error during decryption:', error)

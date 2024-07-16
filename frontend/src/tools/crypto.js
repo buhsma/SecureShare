@@ -42,7 +42,6 @@ const revertKey = async (urlSafeKey) => {
     const rawKey = base64ToArrayBuffer(completeBase64Key);
     const key = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
     const exportedKey = await crypto.subtle.exportKey("jwk", key);
-    console.log(exportedKey);
 
     return exportedKey;
 }

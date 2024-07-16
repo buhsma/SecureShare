@@ -17,6 +17,7 @@ import axios from 'axios';
 import { ref } from 'vue';
 import { getKey, convertKey } from '@/tools/crypto';
 import protobuf from 'protobufjs';
+// import FileChunk from '@/protobuf/protoLoader';
 
 
 export default {
@@ -56,20 +57,24 @@ export default {
             link.value = `http://localhost:5173/download/${id.value}/${urlSaveKey}/${fileName}/${totalChunks}`;
 
             worker.onmessage = async (event) => {
-                console.log('encrypted chunk', event.data.index);
+                // console.log('encrypted chunk', event.data.index);
                 const encryptedChunk = event.data;
+                // console.log('encrypted data', encryptedChunk);
                 chunksEncrypted++;
                 encryptProgress.value = (chunksEncrypted / totalChunks) * 100;
-
+                console.log('chunk', encryptedChunk.chunk);
+                console.log('iv', encryptedChunk.iv);
                 // Create a new FileChunk message
                 let message = FileChunk.create({
-                    chunk: encryptedChunk.chunk,
+                    chunk: new Uint8Array(encryptedChunk.chunk),
                     iv: encryptedChunk.iv
                 });
-
+                console.log('message', message);
                 // Encode the message to a Buffer
                 let buffer = FileChunk.encode(message).finish();
-
+                console.log('buffer', buffer.length);
+                // let decodedMessage = FileChunk.decode(buffer);
+                // console.log('decoded chunk', decodedMessage.chunk);
                 // Add the buffer to the upload queue
                 uploadQueue.value.push(buffer);
 
@@ -91,7 +96,7 @@ export default {
             }
             let index = 0;
             for (let start = 0; start < file.size; start += chunkSize, index++) {
-                console.log('encrypting chunk', index);
+                // console.log('encrypting chunk', index);
                 const chunk = file.slice(start, start + chunkSize);
                 const iv = crypto.getRandomValues(new Uint8Array(12));
 
@@ -108,13 +113,13 @@ export default {
             }
         }
 
-        const uploadChunk = async (buffer, id, index) => {
+        const uploadChunk = async (buffer, id, index, totalChunks) => {
             try {
                 await axios.post(`http://localhost:8000/api/upload/`, buffer, {
                     headers: {
                         'Content-Type': 'application/octet-stream',
                         'id': id,
-                        'index': index
+                        'index': index,
                     },
                     responseType: 'arraybuffer'
                 });

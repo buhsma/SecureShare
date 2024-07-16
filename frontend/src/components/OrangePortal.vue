@@ -3,9 +3,11 @@
 </template>
 
 <script>
-import { ref } from 'vue';
+import { ref, onBeforeMount } from 'vue';
 import { revertKey } from '@/tools/crypto';
 import streamSaver from 'streamsaver';
+import protobuf from 'protobufjs';
+
 
 
 
@@ -14,40 +16,75 @@ export default {
         id: String,
         cryptoKey: String,
         fileName: String,
-        totalChunks: Number
+        totalChunks: String
     },
     setup(props) {
         const worker = new Worker(new URL('@/tools/orangeWorker.js', import.meta.url));
         const status = ref('ready');
         const downloadProgress = ref(0);
+        const totalChunks = Number(props.totalChunks);
+        
         let writer;
 
-        const fetchData = async (writer) => {
-            const response = await fetch(`/api/download/${props.id}`);
-            const data = await response.json();
-            let resolveFetchData;
-            const fetchDataPromise = new Promise(resolve => {
-                resolveFetchData = resolve;
+
+
+        let FileChunk;
+        //half a day to find a / in front of src/protobuf/ was missing. works jusr fine without it in the bluePortal
+        fetch('/src/protobuf/fileChunk.proto')
+            .then(response => response.text())
+            .then(proto => {
+                const root = protobuf.parse(proto).root;
+
+                FileChunk = root.lookupType("fileChunk.FileChunk");
             });
 
-            worker.onmessage = (event) => {
+        const fetchData = async (writer) => {
+            const key = await revertKey(props.cryptoKey);
+            try {
+                for (let index = 0; index < totalChunks; index++) {
+                    const response = await fetch(`/api/download/${props.id}/${index}`);
+                    // console.log('response:', response);
+                    const value = await response.arrayBuffer();
+                    // console.log('value:', value);
+                    const decoded = FileChunk.decode(new Uint8Array(value));
+                    // console.log('decoded object:', decoded);
+
+                    const chunk = decoded.chunk;
+                    const iv = decoded.iv;
+
+                    // console.log('chunk:', chunk.buffer);
+                    // console.log('iv:', iv);
+                    // console.log('key:', key);
+                
+                    worker.postMessage({
+                        chunk: chunk,
+                        iv: iv,
+                        key: key,
+                        index: index
+                    });
+
+                    await new Promise(resolve => {
+                        worker.onmessage = (event) => {
+                            if (writer) {
+                                const decryptedChunk = new Uint8Array(event.data.decryptedChunk);
+                                writer.write(decryptedChunk);
+                                downloadProgress.value = (index + 1) / totalChunks * 100;
+                                if (index === totalChunks - 1) {
+                                    writer.close();
+                                }
+                            }
+                            resolve();
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('An error occurred:', error);
+            } finally {
+                worker.terminate();
                 if (writer) {
-                    const decryptedChunk = new Uint8Array(event.data.decryptedChunk);
-                    writer.write(decryptedChunk);
-                    if (event.data.index === data.length - 1) {
-                        resolveFetchData();
-                        writer.close();
-                    }
+                    writer.releaseLock();
                 }
             }
-
-            const revertedKey = await revertKey(props.cryptoKey);
-            for (let index = 0; index < data.length; index++) {
-                const chunk = data[index];
-                worker.postMessage({ chunk: chunk.chunk, iv: chunk.iv, key: revertedKey , index: index });
-            }
-
-            await fetchDataPromise;
         };
 
 
@@ -59,7 +96,7 @@ export default {
             status.value = 'done';
         };
 
-        
+
 
 
         return {
