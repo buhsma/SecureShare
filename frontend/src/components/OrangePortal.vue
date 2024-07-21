@@ -1,5 +1,8 @@
 <template>
-    <button @click="handleDownload">Download</button>
+    <button v-if="status === 'ready'" @click="handleDownload">Download</button>
+    <div v-if="status === 'downloading'">
+        <progress :value="downloadProgress" max="100"></progress>
+    </div>
 </template>
 
 <script>
@@ -23,7 +26,9 @@ export default {
         const status = ref('ready');
         const downloadProgress = ref(0);
         const totalChunks = Number(props.totalChunks);
-        
+        const chunkBuffer = [];
+        const chunkBufferMax = 3;
+
         let writer;
 
 
@@ -37,73 +42,80 @@ export default {
 
                 FileChunk = root.lookupType("fileChunk.FileChunk");
             });
-
-        const fetchData = async (writer) => {
-            const key = await revertKey(props.cryptoKey);
-            try {
-                for (let index = 0; index < totalChunks; index++) {
-                    const response = await fetch(`/api/download/${props.id}/${index}`);
-                    // console.log('response:', response);
-                    const value = await response.arrayBuffer();
-                    // console.log('value:', value);
-                    const decoded = FileChunk.decode(new Uint8Array(value));
-                    // console.log('decoded object:', decoded);
-
-                    const chunk = decoded.chunk;
-                    const iv = decoded.iv;
-
-                    // console.log('chunk:', chunk.buffer);
-                    // console.log('iv:', iv);
-                    // console.log('key:', key);
-                
-                    worker.postMessage({
-                        chunk: chunk,
-                        iv: iv,
-                        key: key,
-                        index: index
-                    });
-
-                    await new Promise(resolve => {
-                        worker.onmessage = (event) => {
-                            if (writer) {
-                                const decryptedChunk = new Uint8Array(event.data.decryptedChunk);
-                                writer.write(decryptedChunk);
-                                downloadProgress.value = (index + 1) / totalChunks * 100;
-                                if (index === totalChunks - 1) {
-                                    writer.close();
-                                }
-                            }
-                            resolve();
-                        }
-                    });
+        const processChunkBuffer = async (key) => {
+            while (status.value === 'downloading' || chunkBuffer.length > 0) {
+                if (chunkBuffer.length === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    continue;
                 }
-            } catch (error) {
-                console.error('An error occurred:', error);
-            } finally {
-                worker.terminate();
-                if (writer) {
-                    writer.releaseLock();
+                const { index, chunk, iv } = chunkBuffer.shift();
+                worker.postMessage({
+                    chunk: chunk,
+                    iv: iv,
+                    key: key,
+                    index: index
+                });
+                await new Promise(resolve => {
+                    worker.onmessage = (event) => {
+                        if (writer) {
+                            const decryptedChunk = new Uint8Array(event.data.decryptedChunk);
+                            writer.write(decryptedChunk);
+                            downloadProgress.value = (index + 1) / totalChunks * 100;
+                            if (index === totalChunks - 1) {
+                                writer.close();
+                            }
+                        }
+                        resolve();
+                    }
+                });
+            }
+        };
+        const fetchData = async () => {
+            for (let index = 0; index < totalChunks; index++) {
+                let retryCount = 0;
+                while (retryCount < 3) {
+                    try {
+                        const response = await fetch(`/api/download/${props.id}/${index}`);
+                        const value = await response.arrayBuffer();
+                        const decoded = FileChunk.decode(new Uint8Array(value));
+                        chunkBuffer.push({ index: index, chunk: decoded.chunk, iv: decoded.iv });
+
+                        while (chunkBuffer.length >= chunkBufferMax) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                        
+                        break;
+                    } catch (error) {
+                        console.error('An error occurred:', error);
+                        retryCount++;
+                        if (retryCount >= 3) {
+                            throw new Error(`Failed to fetch chunk ${index} after 3 attempts`);
+                        }
+                    }
                 }
             }
         };
 
-
         const handleDownload = async () => {
             status.value = 'downloading';
+            const key = await revertKey(props.cryptoKey);
             const fileStream = streamSaver.createWriteStream('ScureShare-' + props.fileName);
             writer = fileStream.getWriter();
-            await fetchData(writer);
+            fetchData(writer);
+            await processChunkBuffer(key);
+            worker.terminate();
+            if (writer) {
+                writer.releaseLock();
+            }
             status.value = 'done';
         };
 
-
-
-
         return {
-            handleDownload
+            handleDownload,
+            status,
+            downloadProgress
         };
     }
 };
-
 
 </script>

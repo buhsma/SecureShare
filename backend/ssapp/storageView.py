@@ -5,7 +5,6 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from .models import FileChunk
 import base64
-from django.http import JsonResponse
 from rest_framework.decorators import parser_classes
 from .parser import OctetStreamParser
 

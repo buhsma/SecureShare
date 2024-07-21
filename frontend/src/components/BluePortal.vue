@@ -3,7 +3,7 @@
     <input v-if="status === 'input'" type="file" @change="handleFileUpload">
     <div v-else-if="status === 'uploading'">
         <progress :value="encryptProgress" max="100"></progress>
-        <progress :value="uploadProgress" max="100"></progress>
+        <progress :value="isNaN(uploadProgress) ? 0 : uploadProgress" max="100"></progress>
     </div>
     <div v-else-if="status === 'done'">
         <a :href="link">Download</a>
@@ -33,8 +33,8 @@ export default {
         const worker = new Worker(new URL('@/tools/blueWorker.js', import.meta.url));
 
         // Load the .proto file
+        //just for development
         let FileChunk;
-
         fetch('src/protobuf/fileChunk.proto')
             .then(response => response.text())
             .then(proto => {
@@ -47,73 +47,78 @@ export default {
         let chunksEncrypted = 0;
 
         const handleFileUpload = async (event) => {
-            status.value = 'uploading';
+
             const file = event.target.files[0];
             const fileName = file.name;
             const chunkSize = 1024 * 1024 * chunkSizeMB;
             const totalChunks = Math.ceil(file.size / chunkSize);
             const key = await getKey();
             const urlSaveKey = await convertKey(key);
+
+            //var in env
             link.value = `http://localhost:5173/download/${id.value}/${urlSaveKey}/${fileName}/${totalChunks}`;
+            status.value = 'uploading';
+
+            let ongoingUploads = 0;
+            const maxSimultaneousUploads = 5;
 
             worker.onmessage = async (event) => {
-                // console.log('encrypted chunk', event.data.index);
                 const encryptedChunk = event.data;
-                // console.log('encrypted data', encryptedChunk);
                 chunksEncrypted++;
                 encryptProgress.value = (chunksEncrypted / totalChunks) * 100;
-                console.log('chunk', encryptedChunk.chunk);
-                console.log('iv', encryptedChunk.iv);
-                // Create a new FileChunk message
+
                 let message = FileChunk.create({
                     chunk: new Uint8Array(encryptedChunk.chunk),
                     iv: encryptedChunk.iv
                 });
-                console.log('message', message);
-                // Encode the message to a Buffer
+
                 let buffer = FileChunk.encode(message).finish();
-                console.log('buffer', buffer.length);
-                // let decodedMessage = FileChunk.decode(buffer);
-                // console.log('decoded chunk', decodedMessage.chunk);
-                // Add the buffer to the upload queue
-                uploadQueue.value.push(buffer);
 
-                while (uploadQueue.value.length > 0) {
-                    const nextChunk = uploadQueue.value.shift();
-                    try {
-                        await uploadChunk(nextChunk, id.value, encryptedChunk.index);
-                    } catch (error) {
-                        console.error(`failed to upload chunk ${error}`);
-                        // handle error, e.g. by retrying the upload
-                    }
-                }
-                if (chunksUploaded === totalChunks) {
-                    console.log('All chunks uploaded');
-                    worker.terminate();
-                    status.value = 'done';
+                uploadQueue.value.push({ buffer, index: encryptedChunk.index });
 
+                if (ongoingUploads < maxSimultaneousUploads) {
+                    uploadNextChunk();
                 }
             }
+
+            async function uploadNextChunk() {
+                if (uploadQueue.value.length === 0) {
+                    return;
+                }
+
+                ongoingUploads++;
+                const { buffer, index } = uploadQueue.value.shift();
+                try {
+                    await uploadChunk(buffer, id.value, index, totalChunks);
+                } catch (error) {
+                    console.error(`failed to upload chunk ${error}`);
+                } finally {
+                    ongoingUploads--;
+                    if (uploadQueue.value.length > 0) {
+                        uploadNextChunk();
+                    }
+                }
+            }
+
             let index = 0;
             for (let start = 0; start < file.size; start += chunkSize, index++) {
-                // console.log('encrypting chunk', index);
                 const chunk = file.slice(start, start + chunkSize);
                 const iv = crypto.getRandomValues(new Uint8Array(12));
 
-                while (chunksEncrypted > chunksUploaded + maxSimultaneousUploads * 2) {
+                while (index > chunksUploaded + (maxSimultaneousUploads * 2)) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                 }
 
                 worker.postMessage({
                     index,
-                    chunk,
+                    chunk: chunk,
                     key,
                     iv
                 });
             }
         }
 
-        const uploadChunk = async (buffer, id, index, totalChunks) => {
+        const uploadChunk = async (buffer, id, index, totalChunks, retryCount = 0) => {
             try {
                 await axios.post(`http://localhost:8000/api/upload/`, buffer, {
                     headers: {
@@ -126,8 +131,22 @@ export default {
 
                 chunksUploaded++;
                 uploadProgress.value = (chunksUploaded / totalChunks) * 100;
+                buffer = null;
+                if (chunksUploaded === totalChunks) {
+                    console.log('All chunks uploaded');
+                    worker.terminate();
+                    status.value = 'done';
+
+                }
             } catch (error) {
-                throw error;
+                console.error(`failed to upload chunk ${error}`);
+                if (retryCount < 3) {
+                    console.log(`retrying upload... attempt ${retryCount + 1}`);
+                    await uploadChunk(buffer, id, index, totalChunks, retryCount + 1);
+                } else {
+                    console.error(`upload of chunk ${index} failed after 3 attempts`);
+                    throw error;
+                }
             }
         }
 
